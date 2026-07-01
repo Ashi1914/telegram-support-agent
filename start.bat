@@ -13,7 +13,7 @@ for /f "tokens=*" %%i in ('powershell -Command "(Invoke-RestMethod http://localh
 echo ngrok URL: %NGROK_URL%
 
 :: Update WEBHOOK_URL in .env
-powershell -Command "(Get-Content backend\.env) -replace 'WEBHOOK_URL=.*', 'WEBHOOK_URL=%NGROK_URL%/webhook' | Set-Content backend\.env"
+powershell -Command "[System.IO.File]::WriteAllText((Resolve-Path 'backend\.env').Path, ((Get-Content 'backend\.env' -Raw) -replace 'WEBHOOK_URL=.*', 'WEBHOOK_URL=%NGROK_URL%/webhook'))"
 echo Updated .env with new webhook URL.
 
 :: Start FastAPI backend in a new window
