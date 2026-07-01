@@ -17,5 +17,20 @@ class TicketResponse(BaseModel):
         from_attributes = True
 
 
+_VALID_STATUSES = {"open", "in_progress", "resolved", "escalated", "closed"}
+
+
 class TicketStatusUpdate(BaseModel):
     status: str
+
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+
+    @classmethod
+    def validate(cls, v):
+        return cls(status=v)
+
+    def model_post_init(self, __context) -> None:
+        if self.status not in _VALID_STATUSES:
+            raise ValueError(f"status must be one of {sorted(_VALID_STATUSES)}")

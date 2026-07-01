@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import tickets, webhook
+from app.api import conversations, dashboard, tickets, webhook
 from app.core.config import settings
 from app.db.database import Base, engine
 import app.db.log_models  # registers ConversationLog with Base.metadata  # noqa: F401
@@ -70,8 +70,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(webhook.router, prefix="/webhook", tags=["webhook"])
-app.include_router(tickets.router, prefix="/api/tickets", tags=["tickets"])
+app.include_router(webhook.router,       prefix="/webhook",            tags=["webhook"])
+app.include_router(tickets.router,       prefix="/api/tickets",        tags=["tickets"])
+app.include_router(dashboard.router,     prefix="/api/dashboard",      tags=["dashboard"])
+app.include_router(conversations.router, prefix="/api/conversations",  tags=["conversations"])
 
 
 @app.get("/health", tags=["health"])

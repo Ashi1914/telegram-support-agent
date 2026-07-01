@@ -15,7 +15,8 @@ class Ticket(Base):
     message: Mapped[str] = mapped_column(Text)
     ai_response: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(
-        Enum("open", "resolved", "escalated", name="ticket_status"), default="open"
+        Enum("open", "in_progress", "resolved", "escalated", "closed", name="ticket_status"),
+        default="open",
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(

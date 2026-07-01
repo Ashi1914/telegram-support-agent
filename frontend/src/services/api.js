@@ -10,3 +10,15 @@ export const fetchTicket = (id) =>
 
 export const updateTicketStatus = (id, status) =>
   api.patch(`/tickets/${id}/status`, { status }).then((r) => r.data);
+
+export const fetchDashboardStats = () =>
+  api.get("/dashboard/stats").then((r) => r.data);
+
+export const fetchDashboardFeed = () =>
+  api.get("/dashboard/feed").then((r) => r.data);
+
+export const fetchConversations = () =>
+  api.get("/conversations").then((r) => r.data);
+
+export const fetchConversation = (sessionId) =>
+  api.get(`/conversations/${encodeURIComponent(sessionId)}`).then((r) => r.data);
