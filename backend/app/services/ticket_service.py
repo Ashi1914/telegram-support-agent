@@ -2,25 +2,40 @@ from app.db.database import AsyncSessionLocal
 from app.db.models import Ticket
 
 
-async def create_ticket(user_id: str, issue_summary: str) -> dict:
+async def create_ticket(
+    user_id: str,
+    issue_summary: str,
+    status: str = "open",
+) -> dict:
     """
     Create a new support ticket and persist it to the database.
-    Called by the AI agent when a customer issue needs to be tracked.
+    Called by the AI agent when a customer issue needs to be tracked,
+    and by the escalation path (status="escalated") when the agent
+    cannot resolve the issue or the customer requests a human agent.
     """
     async with AsyncSessionLocal() as session:
         ticket = Ticket(
             chat_id=user_id,
             message=issue_summary,
-            status="open",
+            status=status,
         )
         session.add(ticket)
         await session.commit()
         await session.refresh(ticket)
+
+        if status == "escalated":
+            msg = (
+                f"Ticket #{ticket.id} has been escalated to our human support team "
+                f"who will follow up with you shortly."
+            )
+        else:
+            msg = f"Ticket #{ticket.id} has been created and our team will follow up shortly."
+
         return {
             "ticket_id": ticket.id,
             "status": ticket.status,
             "created_at": ticket.created_at.isoformat(),
-            "message": f"Ticket #{ticket.id} has been created and our team will follow up shortly.",
+            "message": msg,
         }
 
 

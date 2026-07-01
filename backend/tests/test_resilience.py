@@ -23,7 +23,6 @@ from app.services.ai_service import (
     generate_response,
     TOOL_TIMEOUT,
     FALLBACK_MESSAGE,
-    _conversation_history,
 )
 from tests.helpers import llm_resp
 
@@ -65,15 +64,16 @@ async def test_kb_failure_bot_responds_gracefully():
     reason about it, and return a helpful reply rather than crashing or returning
     the generic FALLBACK_MESSAGE.
     """
-    _conversation_history.pop("kb_grace_session", None)
-
     def dead_kb(query: str):
         raise RuntimeError("Knowledge base is unavailable")
 
     with (
         patch("app.services.ai_service.search_knowledge_base", new=dead_kb),
         patch("app.services.ai_service._call_llm_react", new_callable=AsyncMock) as mock_llm,
-        patch("app.services.ai_service.log_event",       new_callable=AsyncMock),
+        patch("app.services.ai_service.load_history",       new_callable=AsyncMock, return_value=[]),
+        patch("app.services.ai_service.save_turn",          new_callable=AsyncMock),
+        patch("app.services.ai_service.compress_if_needed", new_callable=AsyncMock),
+        patch("app.services.ai_service.log_event",          new_callable=AsyncMock),
     ):
         # Step 1: LLM decides to search KB
         # Step 2: After seeing the error Observation, LLM offers alternatives

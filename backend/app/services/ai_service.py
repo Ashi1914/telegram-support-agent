@@ -7,6 +7,7 @@ import time
 from groq import AsyncGroq, APIError, APIConnectionError, RateLimitError
 
 from app.core.config import settings
+from app.services.conversation_service import load_history, save_turn, compress_if_needed
 from app.services.knowledge_base import search_knowledge_base
 from app.services.ticket_service import create_ticket, check_ticket_status
 from app.services.trace_service import (
@@ -17,27 +18,6 @@ from app.services.trace_service import (
 logger = logging.getLogger(__name__)
 
 client = AsyncGroq(api_key=settings.GROQ_API_KEY)
-
-# ── Per-session conversation history (multi-turn) ─────────────────────────────
-# Keyed by session_id (= Telegram chat_id). Cleared on process restart.
-# Stores only the clean user question and final assistant reply — not
-# intermediate ReAct steps — so history stays compact and readable.
-_conversation_history: dict[str, list[dict]] = {}
-_MAX_HISTORY_TURNS = 10  # keep last N user/assistant exchanges
-
-
-def _get_history(session_id: str) -> list[dict]:
-    return list(_conversation_history.get(session_id, []))
-
-
-def _append_to_history(session_id: str, user_msg: str, assistant_reply: str) -> None:
-    history = _conversation_history.setdefault(session_id, [])
-    history.append({"role": "user",      "content": user_msg})
-    history.append({"role": "assistant", "content": assistant_reply})
-    max_msgs = _MAX_HISTORY_TURNS * 2
-    if len(history) > max_msgs:
-        _conversation_history[session_id] = history[-max_msgs:]
-
 
 # ── Timeouts & retries ────────────────────────────────────────────────────────
 TOOL_TIMEOUT     = 5.0    # seconds before a tool call is abandoned
@@ -72,6 +52,73 @@ FALLBACK_MESSAGE = (
 )
 
 KNOWN_TOOLS = {"search_knowledge_base", "create_ticket", "check_ticket_status"}
+
+# ── Human-escalation detection ────────────────────────────────────────────────
+MAX_TOOL_CALLS = 3  # escalate if the agent still can't resolve after this many tool uses
+
+_ESCALATION_RE = re.compile(
+    r"\b(speak|talk|chat|connect|transfer)\s+(to|with)\s+(a\s+)?"
+    r"(human|person|agent|representative|rep|manager|supervisor)\b"
+    r"|\bthis\s+is(n'?t|\s+not)\s+work(ing)?\b"
+    r"|\b(this|it)\s+(isn'?t|doesn'?t|does\s+not|is\s+not)\s+(help(ing)?|work(ing)?)\b"
+    r"|\bescalate\b"
+    r"|\bi\s+want\s+(to\s+(talk|speak)\s+to\s+)?a?\s*(human|real\s+person|manager|supervisor)\b"
+    r"|\bget\s+me\s+(a\s+)?(human|person|manager|supervisor|agent)\b",
+    re.IGNORECASE,
+)
+
+
+def _wants_human(text: str) -> bool:
+    return bool(_ESCALATION_RE.search(text))
+
+
+async def _do_escalate(
+    user_message: str,
+    user_id: str,
+    trace_id: str,
+    session_id: str,
+    reason: str,  # "user_requested" | "tool_limit_reached"
+) -> str:
+    """
+    Create an escalated ticket and return the reply to send the customer.
+    Ticket status is set to 'escalated' so the support dashboard can filter it.
+    """
+    if reason == "user_requested":
+        issue_summary = f"[Human requested] {user_message[:500]}"
+    else:
+        issue_summary = f"[Unresolved after {MAX_TOOL_CALLS} tool attempts] {user_message[:500]}"
+
+    try:
+        ticket = await create_ticket(
+            user_id=user_id,
+            issue_summary=issue_summary,
+            status="escalated",
+        )
+        ticket_id = ticket["ticket_id"]
+        await log_event(
+            trace_id=trace_id, session_id=session_id, user_id=user_id,
+            event_type=EVT_AGENT_RESPONSE,
+            payload={"escalated": True, "ticket_id": ticket_id, "reason": reason},
+        )
+        if reason == "user_requested":
+            return (
+                f"Of course! I've created support ticket #{ticket_id} for you and "
+                f"a member of our team will be in touch with you shortly. "
+                f"Thank you for your patience!"
+            )
+        return (
+            f"I'm sorry I wasn't able to fully resolve your issue. "
+            f"I've raised support ticket #{ticket_id} and a human agent "
+            f"will follow up with you shortly. "
+            f"Please keep ticket #{ticket_id} for your reference."
+        )
+    except Exception:
+        logger.exception("Escalation ticket creation failed for user %s", user_id)
+        return (
+            "I wasn't able to resolve your issue and couldn't create a ticket automatically. "
+            "Please contact us directly at support@technest.io for immediate assistance."
+        )
+
 
 SYSTEM_PROMPT = """\
 You are a friendly customer support agent for TechNest, a smart home technology company.
@@ -336,6 +383,7 @@ async def generate_response(
     user_id: str = "",
     trace_id: str = "",
     session_id: str = "",
+    known_name: str | None = None,
 ) -> str:
     """
     ReAct loop: Thought → Action → Observation → … → Final Answer.
@@ -343,15 +391,39 @@ async def generate_response(
     Previous turns for this session are prepended as conversation history so
     follow-up questions have context. Only the clean user question and final
     assistant reply are stored — not intermediate ReAct steps.
+
+    ``known_name`` is set when a returning user starts a new session after the
+    30-minute inactivity timeout, so the agent can greet them by name.
     """
-    history  = _get_history(session_id) if session_id else []
+    # ── Explicit human-escalation request ────────────────────────────────────
+    if _wants_human(user_message):
+        reply = await _do_escalate(user_message, user_id, trace_id, session_id, "user_requested")
+        if session_id:
+            try:
+                await save_turn(session_id, user_id, user_message, reply)
+                await compress_if_needed(session_id, _summarise_history)
+            except Exception:
+                logger.exception("Failed to persist escalation turn for session %s", session_id)
+        return reply
+
+    history  = await load_history(session_id) if session_id else []
+
+    system_content = SYSTEM_PROMPT
+    if known_name:
+        system_content += (
+            f"\n\nNote: This is a returning customer whose Telegram username is "
+            f"@{known_name}. They were inactive and are starting a new session. "
+            f"Greet them warmly by name in your first reply."
+        )
+
     messages: list[dict] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_content},
         *history,
         {"role": "user",   "content": user_message},
     ]
 
     reply = FALLBACK_MESSAGE  # default if loop exhausted without a Final Answer
+    tool_calls_this_turn = 0
 
     for step in range(1, MAX_REACT_STEPS + 1):
         messages = await _enforce_budget(messages, user_id)
@@ -400,6 +472,16 @@ async def generate_response(
         action       = parsed.get("action", "")
         action_input = parsed.get("action_input", {})
 
+        # Escalate if the agent has used MAX_TOOL_CALLS tools without resolving
+        if tool_calls_this_turn >= MAX_TOOL_CALLS:
+            logger.warning(
+                "Tool call limit (%d) reached for user %s — escalating.", MAX_TOOL_CALLS, user_id
+            )
+            reply = await _do_escalate(
+                user_message, user_id, trace_id, session_id, "tool_limit_reached"
+            )
+            break
+
         logger.info(
             "ReAct step %d | thought=%r | action=%s | input=%s",
             step, thought[:100], action, action_input,
@@ -407,14 +489,19 @@ async def generate_response(
 
         result      = await _run_tool(action, action_input, user_id, trace_id, session_id)
         observation = json.dumps(result, ensure_ascii=False)
+        tool_calls_this_turn += 1
 
         # Observation injected as a user turn so the model sees it as external data
         messages.append({"role": "user", "content": f"Observation: {observation}"})
     else:
         logger.error("ReAct loop hit MAX_REACT_STEPS=%d for user %s", MAX_REACT_STEPS, user_id)
 
-    # Save clean turn to history so follow-ups have context
+    # Persist turn to DB so history survives restarts; compress if over threshold
     if session_id:
-        _append_to_history(session_id, user_message, reply)
+        try:
+            await save_turn(session_id, user_id, user_message, reply)
+            await compress_if_needed(session_id, _summarise_history)
+        except Exception:
+            logger.exception("Failed to persist conversation history for session %s", session_id)
 
     return reply

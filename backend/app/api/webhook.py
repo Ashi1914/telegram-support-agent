@@ -9,6 +9,7 @@ from app.db.database import get_db
 from app.db.models import Ticket
 from app.models.telegram import TelegramUpdate
 from app.services.ai_service import generate_response
+from app.services.conversation_service import resolve_session
 from app.services.telegram_service import send_message, send_chat_action
 from app.services.trace_service import new_trace_id, log_event, EVT_MESSAGE_RECEIVED, EVT_ERROR
 
@@ -54,7 +55,9 @@ async def telegram_webhook(
 
     # One trace_id ties every log event in this turn together
     trace_id = new_trace_id()
-    session_id = chat_id          # group all turns from the same user
+
+    # Resolve (or start) the session — resets after 30 min of inactivity
+    session_id, is_new_session, known_name = await resolve_session(chat_id, username)
 
     # ── Log: incoming message ─────────────────────────────────────────────────
     await log_event(
@@ -77,6 +80,7 @@ async def telegram_webhook(
             user_id=chat_id,
             trace_id=trace_id,
             session_id=session_id,
+            known_name=known_name,
         )
     except Exception:
         logger.exception("generate_response crashed — trace_id=%s", trace_id)

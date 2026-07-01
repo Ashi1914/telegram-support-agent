@@ -16,3 +16,15 @@ class ConversationLog(Base):
     event_type: Mapped[str] = mapped_column(String(32))             # see EVENT_* constants
     payload: Mapped[str] = mapped_column(Text)                      # JSON blob
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class ConversationMessage(Base):
+    """Persistent per-user conversation history for multi-turn memory."""
+    __tablename__ = "conversation_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)    # Telegram chat_id (constant across sessions)
+    session_id: Mapped[str] = mapped_column(String(80), index=True)  # "{chat_id}_{n}" — increments on timeout
+    role: Mapped[str] = mapped_column(String(16))   # "user" | "assistant" | "summary"
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
