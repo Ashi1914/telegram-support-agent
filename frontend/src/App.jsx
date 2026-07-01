@@ -4,6 +4,7 @@ import TicketsPage            from "./pages/TicketsPage";
 import TicketDetailPage       from "./pages/TicketDetailPage";
 import ConversationsPage      from "./pages/ConversationsPage";
 import ConversationDetailPage from "./pages/ConversationDetailPage";
+import AgentHealthPage        from "./pages/AgentHealthPage";
 
 export default function App() {
   return (
@@ -19,6 +20,9 @@ export default function App() {
         <NavLink to="/tickets" className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
           Tickets
         </NavLink>
+        <NavLink to="/health" className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
+          Health
+        </NavLink>
       </nav>
       <main className="container">
         <Routes>
@@ -27,6 +31,7 @@ export default function App() {
           <Route path="/conversations/:sessionId"        element={<ConversationDetailPage />} />
           <Route path="/tickets"                         element={<TicketsPage />} />
           <Route path="/tickets/:id"                     element={<TicketDetailPage />} />
+          <Route path="/health"                          element={<AgentHealthPage />} />
         </Routes>
       </main>
     </div>

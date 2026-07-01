@@ -13,6 +13,7 @@ from app.services.ticket_service import create_ticket, check_ticket_status
 from app.services.trace_service import (
     log_event,
     EVT_THOUGHT, EVT_TOOL_CALL, EVT_TOOL_RESULT, EVT_AGENT_RESPONSE,
+    EVT_LLM_CALL, EVT_ERROR,
 )
 
 logger = logging.getLogger(__name__)
@@ -429,20 +430,51 @@ async def generate_response(
         messages = await _enforce_budget(messages, user_id)
 
         # ── LLM call ──────────────────────────────────────────────────────────
+        t_llm = time.monotonic()
         try:
             response = await _call_llm_react(messages)
-        except RateLimitError:
+        except RateLimitError as exc:
+            await log_event(
+                trace_id=trace_id, session_id=session_id, user_id=user_id,
+                event_type=EVT_ERROR,
+                payload={"error": "rate_limit", "step": step, "message": str(exc)},
+            )
             reply = (
                 "I'm receiving a lot of requests right now and all retries failed. "
                 "Please try again in a minute or email support@technest.io."
             )
             break
-        except APIConnectionError:
+        except APIConnectionError as exc:
             logger.error("Groq connection error for user %s", user_id)
+            await log_event(
+                trace_id=trace_id, session_id=session_id, user_id=user_id,
+                event_type=EVT_ERROR,
+                payload={"error": "connection_error", "step": step, "message": str(exc)},
+            )
             break
         except APIError as exc:
             logger.error("Groq API error for user %s: %s", user_id, exc, exc_info=True)
+            await log_event(
+                trace_id=trace_id, session_id=session_id, user_id=user_id,
+                event_type=EVT_ERROR,
+                payload={"error": "api_error", "step": step, "message": str(exc)},
+            )
             break
+
+        llm_duration_ms = round((time.monotonic() - t_llm) * 1000)
+        usage = getattr(response, "usage", None)
+        await log_event(
+            trace_id=trace_id, session_id=session_id, user_id=user_id,
+            event_type=EVT_LLM_CALL,
+            payload={
+                "model":             "llama-3.1-8b-instant",
+                "duration_ms":       llm_duration_ms,
+                "prompt_tokens":     getattr(usage, "prompt_tokens",     0) or 0,
+                "completion_tokens": getattr(usage, "completion_tokens", 0) or 0,
+                "total_tokens":      getattr(usage, "total_tokens",      0) or 0,
+                "step":              step,
+            },
+        )
 
         text = response.choices[0].message.content or ""
         messages.append({"role": "assistant", "content": text})
@@ -495,6 +527,11 @@ async def generate_response(
         messages.append({"role": "user", "content": f"Observation: {observation}"})
     else:
         logger.error("ReAct loop hit MAX_REACT_STEPS=%d for user %s", MAX_REACT_STEPS, user_id)
+        await log_event(
+            trace_id=trace_id, session_id=session_id, user_id=user_id,
+            event_type=EVT_ERROR,
+            payload={"error": "max_steps_exceeded", "max_steps": MAX_REACT_STEPS},
+        )
 
     # Persist turn to DB so history survives restarts; compress if over threshold
     if session_id:

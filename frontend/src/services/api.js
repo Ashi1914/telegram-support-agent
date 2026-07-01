@@ -22,3 +22,8 @@ export const fetchConversations = () =>
 
 export const fetchConversation = (sessionId) =>
   api.get(`/conversations/${encodeURIComponent(sessionId)}`).then((r) => r.data);
+
+export const fetchHealthTools  = () => api.get("/health/tools").then((r) => r.data);
+export const fetchHealthLlm    = () => api.get("/health/llm").then((r) => r.data);
+export const fetchHealthTokens = () => api.get("/health/tokens").then((r) => r.data);
+export const fetchHealthErrors = () => api.get("/health/errors").then((r) => r.data);

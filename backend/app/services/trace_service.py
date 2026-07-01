@@ -25,6 +25,7 @@ EVT_THOUGHT          = "thought"
 EVT_TOOL_CALL        = "tool_call"
 EVT_TOOL_RESULT      = "tool_result"
 EVT_AGENT_RESPONSE   = "agent_response"
+EVT_LLM_CALL         = "llm_call"
 EVT_ERROR            = "error"
 
 # ── Optional Langfuse ─────────────────────────────────────────────────────────
