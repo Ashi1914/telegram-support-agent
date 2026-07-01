@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchDashboardFeed, fetchDashboardStats } from "../services/api";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
 const FEED_INTERVAL_MS = 10_000;
 
@@ -13,22 +15,47 @@ function timeAgo(isoStr) {
 
 function StatCard({ label, value, unit = "", highlight = false }) {
   return (
-    <div className={`stat-card${highlight ? " stat-card--highlight" : ""}`}>
-      <div className="stat-label">{label}</div>
-      <div className="stat-value">
-        {value}
-        {unit && <span className="stat-unit">{unit}</span>}
-      </div>
+    <Card className={highlight ? "border-l-4 border-l-primary" : ""}>
+      <CardContent className="pt-6">
+        <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground mb-2">{label}</p>
+        <p className="text-4xl font-bold text-foreground leading-none">
+          {value}
+          {unit && <span className="text-xl font-medium text-muted-foreground ml-1">{unit}</span>}
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ErrorState({ message, onRetry }) {
+  return (
+    <div className="rounded-lg border border-red-200 bg-red-50 p-8 text-center">
+      <p className="text-sm text-red-600 mb-3">{message}</p>
+      {onRetry && <Button variant="outline" size="sm" onClick={onRetry}>Try again</Button>}
     </div>
   );
 }
 
 export default function DashboardPage() {
-  const [stats, setStats]           = useState(null);
-  const [feed, setFeed]             = useState([]);
+  const [stats, setStats]             = useState(null);
+  const [feed, setFeed]               = useState([]);
   const [lastRefresh, setLastRefresh] = useState(null);
-  const [loading, setLoading]       = useState(true);
-  const [feedPulse, setFeedPulse]   = useState(false);
+  const [loading, setLoading]         = useState(true);
+  const [error, setError]             = useState(null);
+  const [feedPulse, setFeedPulse]     = useState(false);
+
+  const loadAll = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    Promise.all([fetchDashboardStats(), fetchDashboardFeed()])
+      .then(([s, f]) => {
+        setStats(s);
+        setFeed(f);
+        setLastRefresh(new Date());
+      })
+      .catch(() => setError("Failed to load dashboard. Check that the API is running."))
+      .finally(() => setLoading(false));
+  }, []);
 
   const refreshFeed = useCallback(() => {
     fetchDashboardFeed()
@@ -41,76 +68,66 @@ export default function DashboardPage() {
       .catch(() => {});
   }, []);
 
-  useEffect(() => {
-    Promise.all([fetchDashboardStats(), fetchDashboardFeed()])
-      .then(([s, f]) => {
-        setStats(s);
-        setFeed(f);
-        setLastRefresh(new Date());
-      })
-      .finally(() => setLoading(false));
-  }, []);
-
+  useEffect(() => { loadAll(); }, [loadAll]);
   useEffect(() => {
     const id = setInterval(refreshFeed, FEED_INTERVAL_MS);
     return () => clearInterval(id);
   }, [refreshFeed]);
 
-  if (loading) return <p className="dash-loading">Loading dashboard…</p>;
+  if (loading) return (
+    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5 animate-pulse">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="h-28 rounded-xl bg-muted" />
+      ))}
+    </div>
+  );
+
+  if (error) return <ErrorState message={error} onRetry={loadAll} />;
 
   return (
     <div>
-      <h1 className="dash-title">Overview</h1>
+      <h1 className="text-2xl font-bold mb-6">Overview</h1>
 
-      {/* ── Stat cards ─────────────────────────────────────────────────── */}
-      <div className="stat-grid">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5 mb-8">
         <StatCard label="Conversations Today"      value={stats.conversations_today} />
         <StatCard label="Conversations This Week"  value={stats.conversations_week} />
-        <StatCard
-          label="Resolution Rate"
-          value={stats.resolution_rate}
-          unit="%"
-          highlight
-        />
+        <StatCard label="Resolution Rate"          value={stats.resolution_rate} unit="%" highlight />
         <StatCard label="Avg Turns / Conversation" value={stats.avg_turns} />
-        <StatCard
-          label="Open Tickets"
-          value={stats.open_tickets}
-          highlight={stats.open_tickets > 0}
-        />
+        <StatCard label="Open Tickets"             value={stats.open_tickets} highlight={stats.open_tickets > 0} />
       </div>
 
-      {/* ── Live feed ──────────────────────────────────────────────────── */}
-      <div className="feed-header">
-        <h2 className="feed-title">Live Message Feed</h2>
-        <span className="feed-meta-text">
-          {lastRefresh
-            ? `Updated ${timeAgo(lastRefresh.toISOString())} · refreshes every 10 s`
-            : ""}
+      <div className="flex items-baseline gap-3 mb-3">
+        <h2 className="text-base font-semibold">Live Message Feed</h2>
+        <span className="text-xs text-muted-foreground">
+          {lastRefresh ? `Updated ${timeAgo(lastRefresh.toISOString())} · refreshes every 10 s` : ""}
         </span>
       </div>
 
-      <div className={`feed-list${feedPulse ? " feed-list--pulse" : ""}`}>
+      <Card className={feedPulse ? "ring-2 ring-primary/20 transition-shadow" : "transition-shadow"}>
         {feed.length === 0 ? (
-          <p className="feed-empty">No messages yet.</p>
+          <CardContent className="pt-6 text-center text-muted-foreground text-sm py-10">
+            No messages yet.
+          </CardContent>
         ) : (
-          feed.map((msg, i) => (
-            <div key={i} className="feed-item">
-              <div className="feed-avatar">
-                {String(msg.user_id).slice(-2)}
-              </div>
-              <div className="feed-content">
-                <div className="feed-top">
-                  <span className="feed-user">User {msg.user_id}</span>
-                  <span className="feed-session">· {msg.session_id}</span>
+          <CardContent className="p-0 divide-y">
+            {feed.map((msg, i) => (
+              <div key={i} className="flex items-start gap-3 px-4 py-3 hover:bg-muted/30 transition-colors">
+                <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[0.65rem] font-bold flex-shrink-0">
+                  {String(msg.user_id).slice(-2)}
                 </div>
-                <div className="feed-text">{msg.content}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-2 mb-0.5">
+                    <span className="text-xs font-semibold">User {msg.user_id}</span>
+                    <span className="text-xs text-muted-foreground/60">· {msg.session_id}</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground truncate">{msg.content}</p>
+                </div>
+                <span className="text-xs text-muted-foreground whitespace-nowrap pt-0.5 flex-shrink-0">{timeAgo(msg.ts)}</span>
               </div>
-              <div className="feed-time">{timeAgo(msg.ts)}</div>
-            </div>
-          ))
+            ))}
+          </CardContent>
         )}
-      </div>
+      </Card>
     </div>
   );
 }

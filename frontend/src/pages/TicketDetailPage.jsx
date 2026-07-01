@@ -1,44 +1,26 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { fetchTicket, updateTicketStatus } from "../services/api";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { StatusBadge, STATUS_LABEL } from "@/components/StatusBadge";
 
-const STATUS_LABEL = {
-  open:        "Open",
-  in_progress: "In Progress",
-  resolved:    "Resolved",
-  escalated:   "Escalated",
-  closed:      "Closed",
+const ALL_STATUSES = ["open", "in_progress", "resolved", "escalated", "closed"];
+
+const STATUS_VARIANT = {
+  escalated:   "destructive",
+  resolved:    "default",
+  closed:      "secondary",
+  in_progress: "outline",
+  open:        "outline",
 };
 
-const STATUS_ACTIONS = [
-  { value: "open",        label: "Reopen" },
-  { value: "in_progress", label: "Mark In Progress" },
-  { value: "resolved",    label: "Mark Resolved" },
-  { value: "escalated",   label: "Escalate" },
-  { value: "closed",      label: "Close" },
-];
-
-function ConfirmModal({ fromStatus, toStatus, onConfirm, onCancel, saving }) {
+function ErrorState({ message, onRetry }) {
   return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3 className="modal-title">Confirm status change</h3>
-        <p className="modal-body">
-          Change status from{" "}
-          <span className={`badge badge-${fromStatus}`}>{STATUS_LABEL[fromStatus]}</span>{" "}
-          to{" "}
-          <span className={`badge badge-${toStatus}`}>{STATUS_LABEL[toStatus]}</span>?
-        </p>
-        <p className="modal-warning">This will be saved immediately.</p>
-        <div className="modal-actions">
-          <button className="btn btn-outline" onClick={onCancel} disabled={saving}>
-            Cancel
-          </button>
-          <button className="btn btn-primary" onClick={onConfirm} disabled={saving}>
-            {saving ? "Saving…" : "Confirm"}
-          </button>
-        </div>
-      </div>
+    <div className="rounded-lg border border-red-200 bg-red-50 p-8 text-center">
+      <p className="text-sm text-red-600 mb-3">{message}</p>
+      {onRetry && <Button variant="outline" size="sm" onClick={onRetry}>Try again</Button>}
     </div>
   );
 }
@@ -46,84 +28,130 @@ function ConfirmModal({ fromStatus, toStatus, onConfirm, onCancel, saving }) {
 export default function TicketDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [ticket, setTicket]   = useState(null);
-  const [pending, setPending] = useState(null); // nextStatus string
-  const [saving, setSaving]   = useState(false);
+  const [ticket, setTicket]         = useState(null);
+  const [loading, setLoading]       = useState(true);
+  const [error, setError]           = useState(null);
+  const [pending, setPending]       = useState(null); // nextStatus string
+  const [revertError, setRevertError] = useState(null);
 
-  useEffect(() => {
-    fetchTicket(id).then(setTicket);
-  }, [id]);
+  const load = () => {
+    setLoading(true);
+    setError(null);
+    fetchTicket(id)
+      .then(setTicket)
+      .catch(() => setError("Could not load ticket. It may not exist or the API is unavailable."))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { load(); }, [id]);
 
   async function confirmChange() {
-    setSaving(true);
+    const nextStatus = pending;
+    const prevStatus = ticket.status;
+
+    // Optimistic update — reflect change instantly, close the dialog
+    setTicket((t) => ({ ...t, status: nextStatus }));
+    setPending(null);
+    setRevertError(null);
+
+    // Sync with server in background; revert if it fails
     try {
-      const updated = await updateTicketStatus(id, pending);
-      setTicket(updated);
-      setPending(null);
-    } finally {
-      setSaving(false);
+      const updated = await updateTicketStatus(id, nextStatus);
+      setTicket(updated); // pull updated_at and any server-side fields
+    } catch {
+      setTicket((t) => ({ ...t, status: prevStatus }));
+      setRevertError("Failed to save status change. It has been reverted.");
     }
   }
 
-  if (!ticket) return <p className="dash-loading">Loading…</p>;
+  if (loading) return (
+    <div className="space-y-4 animate-pulse max-w-2xl">
+      <div className="h-8 w-32 rounded bg-muted" />
+      <div className="h-32 rounded-xl bg-muted" />
+      <div className="h-32 rounded-xl bg-muted" />
+    </div>
+  );
 
-  const availableActions = STATUS_ACTIONS.filter((a) => a.value !== ticket.status);
+  if (error) return <ErrorState message={error} onRetry={load} />;
+
+  const availableActions = ALL_STATUSES.filter((s) => s !== ticket.status);
 
   return (
     <>
-      {pending && (
-        <ConfirmModal
-          fromStatus={ticket.status}
-          toStatus={pending}
-          onConfirm={confirmChange}
-          onCancel={() => setPending(null)}
-          saving={saving}
-        />
-      )}
+      <Dialog open={!!pending} onOpenChange={(open) => !open && setPending(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm status change</DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-2 pt-1">
+                <p>
+                  Change status from <StatusBadge status={ticket.status} /> to{" "}
+                  <StatusBadge status={pending} />?
+                </p>
+                <p className="text-xs text-muted-foreground">This will be saved immediately.</p>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPending(null)}>Cancel</Button>
+            <Button onClick={confirmChange}>Confirm</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      <div className="transcript-header">
-        <button className="btn btn-sm btn-outline" onClick={() => navigate("/tickets")}>
-          ← Back
-        </button>
-        <div className="transcript-meta">
-          <span className="transcript-user">
-            {ticket.username ? `@${ticket.username}` : ticket.chat_id}
-          </span>
-          <span className="transcript-session">Ticket #{ticket.id}</span>
-          <span className={`badge badge-${ticket.status}`}>
-            {STATUS_LABEL[ticket.status] ?? ticket.status}
-          </span>
+      <div className="flex items-center gap-4 mb-6">
+        <Button variant="outline" size="sm" onClick={() => navigate("/tickets")}>← Back</Button>
+        <div className="flex items-center gap-3">
+          <span className="font-bold">{ticket.username ? `@${ticket.username}` : ticket.chat_id}</span>
+          <span className="text-muted-foreground text-sm">Ticket #{ticket.id}</span>
+          <StatusBadge status={ticket.status} />
         </div>
       </div>
 
-      <div className="card">
-        <h2>Customer message</h2>
-        <p>{ticket.message}</p>
-      </div>
-
-      {ticket.ai_response && (
-        <div className="card">
-          <h2>AI response</h2>
-          <p>{ticket.ai_response}</p>
+      {revertError && (
+        <div className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-3 mb-4 text-sm text-red-600 max-w-2xl">
+          <span>{revertError}</span>
+          <Button variant="ghost" size="sm" className="text-red-600 h-auto py-0" onClick={() => setRevertError(null)}>✕</Button>
         </div>
       )}
 
-      <div className="card">
-        <h2>Update status</h2>
-        <div className="ticket-actions">
-          {availableActions.map((a) => (
-            <button
-              key={a.value}
-              className={`btn btn-sm ${a.value === "escalated" ? "btn-danger" : a.value === "closed" || a.value === "resolved" ? "btn-success" : "btn-outline"}`}
-              onClick={() => setPending(a.value)}
-            >
-              {a.label}
-            </button>
-          ))}
-        </div>
-        <p className="ticket-updated">
-          Last updated: {new Date(ticket.updated_at).toLocaleString()}
-        </p>
+      <div className="space-y-4 max-w-2xl">
+        <Card>
+          <CardHeader><CardTitle className="text-base">Customer message</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground leading-relaxed">{ticket.message}</p>
+          </CardContent>
+        </Card>
+
+        {ticket.ai_response && (
+          <Card>
+            <CardHeader><CardTitle className="text-base">AI response</CardTitle></CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground leading-relaxed">{ticket.ai_response}</p>
+            </CardContent>
+          </Card>
+        )}
+
+        <Card>
+          <CardHeader><CardTitle className="text-base">Update status</CardTitle></CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {availableActions.map((s) => (
+                <Button
+                  key={s}
+                  size="sm"
+                  variant={STATUS_VARIANT[s] ?? "outline"}
+                  onClick={() => { setRevertError(null); setPending(s); }}
+                >
+                  {STATUS_LABEL[s]}
+                </Button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground mt-4">
+              Last updated: {new Date(ticket.updated_at).toLocaleString()}
+            </p>
+          </CardContent>
+        </Card>
       </div>
     </>
   );
