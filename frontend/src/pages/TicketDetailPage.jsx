@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { fetchTicket, updateTicketStatus } from "../services/api";
+import { fetchTicket, updateTicketStatus, replyToTicket } from "../services/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { StatusBadge, STATUS_LABEL } from "@/components/StatusBadge";
 
 const ALL_STATUSES = ["open", "in_progress", "resolved", "escalated", "closed"];
+const HANDED_OFF_STATUSES = ["escalated", "in_progress"];
 
 const STATUS_VARIANT = {
   escalated:   "destructive",
@@ -33,6 +34,10 @@ export default function TicketDetailPage() {
   const [error, setError]           = useState(null);
   const [pending, setPending]       = useState(null); // nextStatus string
   const [revertError, setRevertError] = useState(null);
+  const [replyText, setReplyText]   = useState("");
+  const [sending, setSending]       = useState(false);
+  const [replyError, setReplyError] = useState(null);
+  const [replySent, setReplySent]   = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -61,6 +66,24 @@ export default function TicketDetailPage() {
     } catch {
       setTicket((t) => ({ ...t, status: prevStatus }));
       setRevertError("Failed to save status change. It has been reverted.");
+    }
+  }
+
+  async function sendReply() {
+    const message = replyText.trim();
+    if (!message || sending) return;
+
+    setSending(true);
+    setReplyError(null);
+    setReplySent(false);
+    try {
+      await replyToTicket(id, message);
+      setReplyText("");
+      setReplySent(true);
+    } catch {
+      setReplyError("Failed to send reply. Please try again.");
+    } finally {
+      setSending(false);
     }
   }
 
@@ -128,6 +151,33 @@ export default function TicketDetailPage() {
             <CardHeader><CardTitle className="text-base">AI response</CardTitle></CardHeader>
             <CardContent>
               <p className="text-sm text-muted-foreground leading-relaxed">{ticket.ai_response}</p>
+            </CardContent>
+          </Card>
+        )}
+
+        {HANDED_OFF_STATUSES.includes(ticket.status) && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Reply to customer</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-xs text-muted-foreground mb-2">
+                This conversation has been handed off from the AI — messages sent here go straight to the customer on Telegram.
+              </p>
+              <textarea
+                className="w-full min-h-24 rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                placeholder="Type a reply…"
+                value={replyText}
+                onChange={(e) => { setReplyText(e.target.value); setReplySent(false); }}
+                disabled={sending}
+              />
+              <div className="flex items-center gap-3 mt-3">
+                <Button size="sm" onClick={sendReply} disabled={sending || !replyText.trim()}>
+                  {sending ? "Sending…" : "Send"}
+                </Button>
+                {replySent && <span className="text-xs text-green-600">Sent.</span>}
+                {replyError && <span className="text-xs text-red-600">{replyError}</span>}
+              </div>
             </CardContent>
           </Card>
         )}

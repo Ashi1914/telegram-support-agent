@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class TicketResponse(BaseModel):
@@ -34,3 +34,7 @@ class TicketStatusUpdate(BaseModel):
     def model_post_init(self, __context) -> None:
         if self.status not in _VALID_STATUSES:
             raise ValueError(f"status must be one of {sorted(_VALID_STATUSES)}")
+
+
+class TicketReply(BaseModel):
+    message: str = Field(min_length=1, max_length=4096)

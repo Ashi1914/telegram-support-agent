@@ -42,7 +42,7 @@ def init_knowledge_base(persist_path: str = "./chroma_db") -> None:
     _collection = _build_collection(client)
 
 
-def search_knowledge_base(query: str, n_results: int = 3) -> list[dict]:
+def search_knowledge_base(query: str, n_results: int = 5) -> list[dict]:
     """
     RAG retrieval: return the top-n FAQ entries most relevant to *query*.
     Each result has keys: question, answer, score (0–1, higher = more relevant).

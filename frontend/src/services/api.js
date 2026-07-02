@@ -11,6 +11,9 @@ export const fetchTicket = (id) =>
 export const updateTicketStatus = (id, status) =>
   api.patch(`/tickets/${id}/status`, { status }).then((r) => r.data);
 
+export const replyToTicket = (id, message) =>
+  api.post(`/tickets/${id}/reply`, { message }).then((r) => r.data);
+
 export const fetchDashboardStats = () =>
   api.get("/dashboard/stats").then((r) => r.data);
 

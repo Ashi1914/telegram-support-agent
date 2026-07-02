@@ -114,6 +114,27 @@ async def load_history(session_id: str, n_turns: int = 10) -> list[dict]:
         return messages
 
 
+async def latest_session_id(chat_id: str) -> str:
+    """Return the most recent session_id for this user, or a fresh one if none exists."""
+    async with AsyncSessionLocal() as db:
+        stmt = (
+            select(ConversationMessage.session_id)
+            .where(ConversationMessage.user_id == chat_id)
+            .order_by(ConversationMessage.created_at.desc())
+            .limit(1)
+        )
+        result = await db.execute(stmt)
+        session_id = result.scalar_one_or_none()
+        return session_id or f"{chat_id}_1"
+
+
+async def save_message(session_id: str, user_id: str, role: str, content: str) -> None:
+    """Persist a single conversation message (no paired reply)."""
+    async with AsyncSessionLocal() as db:
+        db.add(ConversationMessage(user_id=user_id, session_id=session_id, role=role, content=content))
+        await db.commit()
+
+
 async def save_turn(
     session_id: str,
     user_id: str,

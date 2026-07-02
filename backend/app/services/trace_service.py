@@ -27,6 +27,7 @@ EVT_TOOL_RESULT      = "tool_result"
 EVT_AGENT_RESPONSE   = "agent_response"
 EVT_LLM_CALL         = "llm_call"
 EVT_ERROR            = "error"
+EVT_HUMAN_REPLY      = "human_reply"
 
 # ── Optional Langfuse ─────────────────────────────────────────────────────────
 _langfuse = None

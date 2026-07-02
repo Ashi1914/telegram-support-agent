@@ -41,6 +41,18 @@ function EventCard({ event }) {
     );
   }
 
+  if (type === "human_reply") {
+    return (
+      <div className="flex flex-col gap-1">
+        <span className="text-[0.65rem] font-semibold uppercase tracking-widest text-muted-foreground">Support team</span>
+        <div className="bg-emerald-900 text-emerald-50 rounded-xl rounded-tl-sm px-4 py-2.5 text-sm leading-relaxed max-w-prose whitespace-pre-wrap">
+          {payload.message}
+        </div>
+        <span className="text-[0.65rem] text-muted-foreground/60">{fmt(ts)}</span>
+      </div>
+    );
+  }
+
   if (type === "thought") {
     return (
       <div className="flex items-baseline gap-2 border-l-2 border-amber-400 pl-3 py-1 bg-amber-50 rounded-r-md flex-wrap">

@@ -1,5 +1,11 @@
+from sqlalchemy import select
+
 from app.db.database import AsyncSessionLocal
 from app.db.models import Ticket
+
+# Statuses under which a user's conversation has been handed off to a human
+# and the AI must not auto-reply.
+_ACTIVE_HANDOFF_STATUSES = ("escalated", "in_progress")
 
 
 async def create_ticket(
@@ -37,6 +43,53 @@ async def create_ticket(
             "created_at": ticket.created_at.isoformat(),
             "message": msg,
         }
+
+
+async def send_human_reply(ticket_id: int, message: str) -> dict:
+    """
+    Send a manual reply from the dashboard (admin/manager) to the customer on
+    Telegram, and record it in conversation history/logs so it shows up in the
+    conversation timeline and is available as context if the AI resumes later.
+    """
+    from app.services import conversation_service, telegram_service
+    from app.services.trace_service import EVT_HUMAN_REPLY, log_event, new_trace_id
+
+    async with AsyncSessionLocal() as session:
+        ticket = await session.get(Ticket, ticket_id)
+        if not ticket:
+            raise ValueError(f"Ticket #{ticket_id} was not found.")
+        chat_id = ticket.chat_id
+
+    await telegram_service.send_message(chat_id, message)
+
+    session_id = await conversation_service.latest_session_id(chat_id)
+    await conversation_service.save_message(session_id, chat_id, "assistant", message)
+
+    await log_event(
+        trace_id=new_trace_id(),
+        session_id=session_id,
+        user_id=chat_id,
+        event_type=EVT_HUMAN_REPLY,
+        payload={"ticket_id": ticket_id, "message": message},
+    )
+
+    return {"ticket_id": ticket_id, "chat_id": chat_id, "message": message}
+
+
+async def has_active_escalation(chat_id: str) -> bool:
+    """
+    True when this user has a ticket that has been handed off to a human
+    (escalated or being worked on) and hasn't been resolved/closed yet.
+    While true, the AI must stay silent for this user.
+    """
+    async with AsyncSessionLocal() as session:
+        stmt = (
+            select(Ticket.id)
+            .where(Ticket.chat_id == chat_id, Ticket.status.in_(_ACTIVE_HANDOFF_STATUSES))
+            .limit(1)
+        )
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none() is not None
 
 
 async def check_ticket_status(ticket_id: int) -> dict:

@@ -58,13 +58,13 @@ KNOWN_TOOLS = {"search_knowledge_base", "create_ticket", "check_ticket_status"}
 MAX_TOOL_CALLS = 3  # escalate if the agent still can't resolve after this many tool uses
 
 _ESCALATION_RE = re.compile(
-    r"\b(speak|talk|chat|connect|transfer)\s+(to|with)\s+(a\s+)?"
+    r"\b(speak|talk|chat|connect|transfer)\s+(me\s+|us\s+)?(to|with)\s+((a|an)\s+)?(real\s+)?"
     r"(human|person|agent|representative|rep|manager|supervisor)\b"
     r"|\bthis\s+is(n'?t|\s+not)\s+work(ing)?\b"
     r"|\b(this|it)\s+(isn'?t|doesn'?t|does\s+not|is\s+not)\s+(help(ing)?|work(ing)?)\b"
     r"|\bescalate\b"
-    r"|\bi\s+want\s+(to\s+(talk|speak)\s+to\s+)?a?\s*(human|real\s+person|manager|supervisor)\b"
-    r"|\bget\s+me\s+(a\s+)?(human|person|manager|supervisor|agent)\b",
+    r"|\bi\s+want\s+(to\s+(talk|speak)\s+to\s+)?(a|an)?\s*(real\s+)?(human|person|real\s+person|manager|supervisor|agent)\b"
+    r"|\bget\s+me\s+((a|an)\s+)?(human|person|manager|supervisor|agent)\b",
     re.IGNORECASE,
 )
 
@@ -103,14 +103,14 @@ async def _do_escalate(
         )
         if reason == "user_requested":
             return (
-                f"Of course! I've created support ticket #{ticket_id} for you and "
-                f"a member of our team will be in touch with you shortly. "
+                f"Of course! I've created support ticket #{ticket_id} for you. "
+                f"Our support team will review it on our end and follow up with you shortly. "
                 f"Thank you for your patience!"
             )
         return (
             f"I'm sorry I wasn't able to fully resolve your issue. "
-            f"I've raised support ticket #{ticket_id} and a human agent "
-            f"will follow up with you shortly. "
+            f"I've raised support ticket #{ticket_id} for our support team to review "
+            f"and follow up with you shortly. "
             f"Please keep ticket #{ticket_id} for your reference."
         )
     except Exception:
@@ -146,6 +146,13 @@ Rules:
 - Never fabricate an Observation — wait for the system to provide it.
 - If a tool result contains an "error" key, acknowledge it in the next Thought and adapt.
 - Only write "Final Answer:" when you are ready to reply to the customer.
+- For search_knowledge_base, the FIRST attempt should use the customer's own wording
+  (stripped of filler), not a paraphrase — added context words (e.g. company name,
+  "subscription plans") can pull the search toward an unrelated but similarly-worded
+  FAQ entry. The result list is ordered by relevance but the right answer is not
+  always first — read all of them before deciding.
+- If a search doesn't answer the question, the retry query must be meaningfully
+  different (a different angle or more specific term) — never repeat the same query.
 """
 
 

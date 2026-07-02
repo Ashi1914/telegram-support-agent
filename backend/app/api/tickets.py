@@ -4,7 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
 from app.db.models import Ticket
-from app.models.ticket import TicketResponse, TicketStatusUpdate
+from app.models.ticket import TicketReply, TicketResponse, TicketStatusUpdate
+from app.services.ticket_service import send_human_reply
 
 router = APIRouter()
 
@@ -42,3 +43,18 @@ async def update_ticket_status(
     await db.commit()
     await db.refresh(ticket)
     return ticket
+
+
+@router.post("/{ticket_id}/reply")
+async def reply_to_ticket(
+    ticket_id: int,
+    body: TicketReply,
+    db: AsyncSession = Depends(get_db),
+):
+    ticket = await db.get(Ticket, ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    try:
+        return await send_human_reply(ticket_id, body.message)
+    except Exception:
+        raise HTTPException(status_code=502, detail="Failed to send message to the customer.")

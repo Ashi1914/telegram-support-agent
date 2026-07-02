@@ -9,8 +9,9 @@ from app.db.database import get_db
 from app.db.models import Ticket
 from app.models.telegram import TelegramUpdate
 from app.services.ai_service import generate_response
-from app.services.conversation_service import resolve_session
+from app.services.conversation_service import resolve_session, save_message
 from app.services.telegram_service import send_message, send_chat_action
+from app.services.ticket_service import has_active_escalation
 from app.services.trace_service import new_trace_id, log_event, EVT_MESSAGE_RECEIVED, EVT_ERROR
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,14 @@ async def telegram_webhook(
             "message_id": message.message_id,
         },
     )
+
+    # ── Conversation handed off to a human — stay silent, just log the message ─
+    if await has_active_escalation(chat_id):
+        try:
+            await save_message(session_id, chat_id, "user", user_text)
+        except Exception:
+            logger.exception("Failed to persist handed-off message — trace_id=%s", trace_id)
+        return {"ok": True}
 
     # ── Generate AI reply (show typing indicator while processing) ───────────
     typing_task = asyncio.create_task(_keep_typing(chat_id))
