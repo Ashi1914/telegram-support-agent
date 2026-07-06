@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
 from app.db.models import Ticket
 from app.models.ticket import TicketReply, TicketResponse, TicketStatusUpdate
+from app.services.conversation_service import session_id_at
 from app.services.ticket_service import send_human_reply
 
 router = APIRouter()
@@ -15,7 +16,16 @@ async def list_tickets(
     status: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(Ticket).order_by(Ticket.created_at.desc())
+    # Every incoming message is logged to the `tickets` table with an
+    # ai_response attached (see webhook.py) for audit purposes — those rows
+    # aren't real tickets and shouldn't clutter this page. Only rows created
+    # via ticket_service.create_ticket() (escalations + agent follow-ups,
+    # which never set ai_response) belong here.
+    query = (
+        select(Ticket)
+        .where(Ticket.ai_response.is_(None))
+        .order_by(Ticket.created_at.desc())
+    )
     if status:
         query = query.where(Ticket.status == status)
     result = await db.execute(query)
@@ -27,6 +37,7 @@ async def get_ticket(ticket_id: int, db: AsyncSession = Depends(get_db)):
     ticket = await db.get(Ticket, ticket_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket.session_id = await session_id_at(ticket.chat_id, ticket.created_at)
     return ticket
 
 

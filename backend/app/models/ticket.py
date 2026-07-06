@@ -12,6 +12,7 @@ class TicketResponse(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+    session_id: str | None = None
 
     class Config:
         from_attributes = True

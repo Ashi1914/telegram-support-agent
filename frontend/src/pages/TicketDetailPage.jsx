@@ -129,6 +129,16 @@ export default function TicketDetailPage() {
           <span className="text-muted-foreground text-sm">Ticket #{ticket.id}</span>
           <StatusBadge status={ticket.status} />
         </div>
+        {ticket.session_id && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto"
+            onClick={() => navigate(`/conversations/${encodeURIComponent(ticket.session_id)}`)}
+          >
+            View full conversation →
+          </Button>
+        )}
       </div>
 
       {revertError && (

@@ -114,6 +114,19 @@ async def load_history(session_id: str, n_turns: int = 10) -> list[dict]:
         return messages
 
 
+async def session_id_at(chat_id: str, at: datetime) -> str | None:
+    """Return the session_id that was active for this user at the given time."""
+    async with AsyncSessionLocal() as db:
+        stmt = (
+            select(ConversationMessage.session_id)
+            .where(ConversationMessage.user_id == chat_id, ConversationMessage.created_at <= at)
+            .order_by(ConversationMessage.created_at.desc())
+            .limit(1)
+        )
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
+
+
 async def latest_session_id(chat_id: str) -> str:
     """Return the most recent session_id for this user, or a fresh one if none exists."""
     async with AsyncSessionLocal() as db:
